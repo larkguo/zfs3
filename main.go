@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -12,7 +11,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -296,51 +294,6 @@ func ZfsSendOne(ctx aws.Context, sess *session.Session, bucket, key, stream *str
 	return err
 }
 
-func PutZipFile(ctx aws.Context, sess *session.Session, writer *s3.GetObjectInput, reader *s3manager.UploadInput) error {
-	pr, pw := io.Pipe()
-
-	// Create zip.Write which will writes to pipes
-	zipWriter := zip.NewWriter(pw)
-	wg := sync.WaitGroup{}
-	wg.Add(2)
-	go func() { // Run downloader
-		// We need to close our zip.Writer and also pipe writer
-		// zip.Writer doesn't close underylying writer
-		defer func() {
-			wg.Done()
-			zipWriter.Close()
-			pw.Close()
-		}()
-		// Sequantially downloads each file to writer from zip.Writer
-		w, err := zipWriter.Create(path.Base(*writer.Key))
-		if err != nil {
-			log.Println(err)
-		}
-		downloader := s3manager.NewDownloader(sess)
-		_, err = downloader.DownloadWithContext(ctx, FakeWriterAt{w}, writer,
-			func(d *s3manager.Downloader) {
-				d.Concurrency = 1
-			})
-		if err != nil {
-			log.Println("Download err:", err.Error())
-			return
-		}
-	}()
-	go func() { // Run uploader
-		defer wg.Done()
-		// Upload the file, body is `io.Reader` from pipe
-		reader.Body = pr
-		uploader := s3manager.NewUploader(sess)
-		_, err := uploader.UploadWithContext(ctx, reader)
-		if err != nil {
-			log.Println("Upload err:", err.Error())
-			return
-		}
-	}()
-	wg.Wait()
-	return nil
-}
-
 func PutMd5File(url, accesskey, secretkey, bucket, filename, region *string, virtualhost *bool) error {
 	var useSSL bool
 	var endpoint string
@@ -614,7 +567,7 @@ func GetObject(ctx aws.Context, sess *session.Session, bucket, filename *string,
 func Usage() {
 	log.Fatalln(`
 Please specify
-  Handle(-h up|down|get|del|head|list|res|md5|zip|cryp|zsend|zrecv|help) 
+  Handle(-h up|down|get|del|head|list|res|md5|cryp|zsend|zrecv|help) 
   Bucket (-b BUCKET) 
   Filename (-f FILENAME) 
   AccessKey(-ak AK) 
@@ -643,7 +596,7 @@ example:
 func main1() {
 	var err error
 
-	handle := flag.String("h", "", "The handle of up|down|get|del|head|list|res|md5|zip|cryp|zsend|zrecv|help")
+	handle := flag.String("h", "", "The handle of up|down|get|del|head|list|res|md5|cryp|zsend|zrecv|help")
 	bucket := flag.String("b", "", "Bucket ")
 	filename := flag.String("f", "", "FileName ")
 	snapshot := flag.String("ss", "", "zfs snapshot(example: pool1/file1@snap1)")
@@ -737,19 +690,6 @@ func main1() {
 			return
 		}
 		log.Println("Uploaded " + *filename)
-	case "zip":
-		err = PutZipFile(ctx, sess, &s3.GetObjectInput{
-			Bucket: bucket,
-			Key:    filename,
-		}, &s3manager.UploadInput{
-			Bucket: bucket,
-			Key:    aws.String(*filename + ".zip"),
-		})
-		if err != nil {
-			log.Println("Got error! zip " + *filename + ": " + err.Error())
-			return
-		}
-		log.Println("Zipped " + *filename)
 	case "del":
 		err = DeleteItem(ctx, sess, bucket, filename)
 		if err != nil {
@@ -801,3 +741,4 @@ func main1() {
 		log.Println("This function took: ", elapsed)
 	}
 }
+
