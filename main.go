@@ -593,7 +593,7 @@ example:
 	)
 }
 
-func main1() {
+func main() {
 	var err error
 
 	handle := flag.String("h", "", "The handle of up|down|get|del|head|list|res|md5|cryp|zsend|zrecv|help")
